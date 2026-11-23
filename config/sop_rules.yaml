@@ -1,0 +1,309 @@
+# AX-15 2.0 policy rules: the escalation SOP as data (L3 trust layer, "rules from code").
+# Evaluated by src/ax15/trust/sop_rules.py (pure code, no LLM). Review table: outputs/sop_rules_table.md
+#
+# Every rule has an id, a condition over named facts (`when`), an effect and a source citation.
+# Facts come from code (tools: ticket, CMDB, SLA, recent tickets, past actions) and from the
+# classify node (facts only, no decisions). A missing fact is false / 0.
+#
+# Condition language:  {fact: x}                 x is truthy
+#                      {fact: x, op: ">=", value: 2}   ops: == != >= > <= < in hour_in
+#                      {all: [...]} / {any: [...]} / {not: {...}}
+#
+# Decision = the first stage (in `stages` order) with a fired rule; later-stage rules that also
+# fired are reported as superseded. Nothing fired -> default l1 (SOP Step 2: basic troubleshooting).
+
+version: 1
+timezone: Asia/Kolkata          # ticket timestamps are IST in the source data; SOP hours are IST
+
+docs:
+  ESC: sop/escalation-procedure.md     # SOP-IT-L1-002 v1.0
+  AX: AX-15 policy
+
+stages: [verify, safety, non_it, power, do_not_escalate, escalate, clarify]
+
+# Fixed reply text a rule can put at the start of the store reply (effect reply_prefix: <key>). Added in code
+# after the compose and guard nodes, never written by the model.
+replies:
+  safety: >-
+    For your safety: keep everyone away from the device. Switch off power at the breaker only if it is safe to
+    do so. Follow the store's emergency procedure and call emergency services if there is fire or an injury.
+    Do not try to fix or restart the device.
+
+rules:
+  # --- stage verify -------------------------------------------------------------------------
+  - id: AX-VERIFY
+    stage: verify
+    when: {fact: ticket_closed}
+    effect: {decision: verify}
+    reason: "Ticket status is Resolved/Closed: verify the recorded resolution, do not re-troubleshoot"
+    source: {doc: AX, section: "Resolved/Closed tickets -> verify mode"}
+
+  # --- stage safety (AX-15 policy, v2.0.2): right after verify, before non-IT -----------------------
+  # Any equipment, IT or not (a fryer fire too). Closed tickets stay in verify mode with a flag.
+  - id: AX-SAFETY
+    stage: safety
+    when: {fact: safety_hazard}
+    effect: {decision: escalate, priority: P1, no_steps: true, notify: [facilities], reply_prefix: safety,
+             verify_flag: safety_hazard_reported}
+    reason: "Safety hazard (fire, smoke, burning smell, sparks, electric shock or exposed wiring, incl. suspected): keep people away, no troubleshooting"
+    source: {doc: AX, section: "Safety hazard -> L2 + facilities, P1, no steps, fixed safety reply"}
+
+  # --- stage non_it -------------------------------------------------------------------------
+  - id: AX-NON-IT
+    stage: non_it
+    when: {not: {fact: is_it}}
+    effect: {decision: non_it}
+    reason: "No IT issue in the ticket: redirect to the right team"
+    source: {doc: ESC, section: "Purpose / Scope (POS, network, payment terminals and related IT services)"}
+
+  # --- stage power (AX-15 policy, v2.0.1): after non-IT, before the do-not-escalate list -----------
+  - id: AX-POWER
+    stage: power
+    when: {fact: power_instability}
+    effect: {decision: escalate, no_steps: true, notify: [facilities]}
+    reason: "Repeated loss of mains power at the store: an electrical supply issue, not a POS fault"
+    source: {doc: AX, section: "Power instability -> L2 + facilities, no POS troubleshooting steps"}
+
+  # --- stage do_not_escalate (SOP Step 1 checks this list first) ----------------------------
+  - id: SOP-DNE-1
+    stage: do_not_escalate
+    when: {fact: dne_how_to}
+    effect: {decision: l1, routing: l1_self_service}
+    reason: "How-to / training question (e.g. password reset, reports, menu navigation): point to the KB"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 1. Basic How-To & Training Questions"}
+  - id: SOP-DNE-2
+    stage: do_not_escalate
+    when: {fact: dne_user_error}
+    effect: {decision: l1, routing: l1_self_service}
+    reason: "User error or incorrect configuration: correct it and guide proper use"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 2. User Error or Incorrect Configuration"}
+  - id: SOP-DNE-3
+    stage: do_not_escalate
+    when: {fact: dne_billing}
+    effect: {decision: non_it, redirect: "Billing@servewell.in"}
+    reason: "Billing, account or licensing issue: route to Billing@servewell.in, not L2"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 3. Billing, Account, or Licensing Issues"}
+  - id: SOP-DNE-4
+    stage: do_not_escalate
+    when: {fact: dne_maintenance}
+    effect: {decision: l1}
+    reason: "Scheduled maintenance or known downtime: reference the notice and restoration time"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 4. Scheduled Maintenance or Known Downtime"}
+  - id: SOP-DNE-5
+    stage: do_not_escalate
+    when: {fact: dne_feature_request}
+    effect: {decision: l1}
+    reason: "Feature request: log it in Product Feedback"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 5. Feature Requests or Enhancement Suggestions"}
+  - id: SOP-DNE-6
+    stage: do_not_escalate
+    when: {fact: dne_third_party_only}
+    effect: {decision: l1}
+    reason: "Fault is with a third-party provider's own service (ISP, card processor, vendor): advise the store to contact them"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 6. Third-Party Service Coordination"}
+  - id: SOP-DNE-7
+    stage: do_not_escalate
+    when: {all: [{fact: dne_resolved_after_reset}, {not: {fact: power_instability}}]}   # v2.0.1: not when mains power keeps dropping
+    effect: {decision: l1, routing: l1_self_service}
+    reason: "Connectivity already restored after a reboot/reseat/reset: confirm normal operation and close"
+    source: {doc: ESC, section: "Do-Not-Escalate List > 7. General Connectivity Troubleshooting (if resolved)"}
+
+  # --- stage escalate: SOP immediate triggers ------------------------------------------------
+  - id: SOP-TRIG-PAYMENT
+    stage: escalate
+    when: {fact: payment_failure}
+    effect: {decision: escalate}
+    reason: "Payment processing failure (transactions not completing / payment terminal unresponsive)"
+    source: {doc: ESC, section: "Common Escalation Triggers > Payment processing failure"}
+  - id: SOP-TRIG-POS-OUTAGE
+    stage: escalate
+    when: {fact: pos_outage_all}
+    effect: {decision: escalate}
+    reason: "Complete POS outage (all terminals down at the location)"
+    source: {doc: ESC, section: "Common Escalation Triggers > Complete POS system outage"}
+  - id: SOP-TRIG-DATA
+    stage: escalate
+    when: {fact: data_loss}
+    effect: {decision: escalate}
+    reason: "Database corruption or data loss indicators"
+    source: {doc: ESC, section: "Common Escalation Triggers > Database corruption or data loss"}
+  - id: SOP-TRIG-SECURITY
+    stage: escalate
+    when: {fact: security_incident}
+    effect: {decision: escalate}
+    reason: "Suspected security incident (unauthorized access, malware symptoms)"
+    source: {doc: ESC, section: "Common Escalation Triggers > Security incident"}
+  - id: SOP-TRIG-NETWORK
+    stage: escalate
+    when: {any: [{fact: network_infrastructure_down}, {fact: multiple_locations}]}
+    effect: {decision: escalate}
+    reason: "Network infrastructure failure (switch/router down, or multiple locations affected)"
+    source: {doc: ESC, section: "Common Escalation Triggers > Network infrastructure failure"}
+  - id: SOP-TRIG-INTEGRATION
+    stage: escalate
+    when: {fact: integration_failure}
+    effect: {decision: escalate}
+    reason: "Third-party integration failure (payment gateway, kitchen display, aggregator/reporting platform)"
+    source: {doc: ESC, section: "Common Escalation Triggers > Third-party integration failure"}
+  - id: SOP-TRIG-ERROR-CODE
+    stage: escalate
+    when: {fact: unknown_error_codes, op: ">=", value: 1}
+    effect: {decision: escalate}
+    reason: "Error code not in the knowledge base: {unknown_error_codes_text}"
+    source: {doc: ESC, section: "Common Escalation Triggers > Error code not in knowledge base"}
+  - id: SOP-TRIG-WAITED
+    stage: escalate
+    when: {fact: waited_over_30_min}
+    effect: {decision: escalate}
+    reason: "Customer has already waited more than 30 minutes after initial contact"
+    source: {doc: ESC, section: "Common Escalation Triggers > Customer has already waited >30 minutes"}
+  - id: SOP-TRIG-COMPLIANCE
+    stage: escalate
+    when: {fact: compliance_impact}
+    effect: {decision: escalate}
+    reason: "Issue affects a compliance or regulatory requirement"
+    source: {doc: ESC, section: "Common Escalation Triggers > Issue affects compliance"}
+  - id: SOP-TRIG-REQUESTED
+    stage: escalate
+    when: {any: [{fact: customer_requested_escalation}, {fact: expresses_dissatisfaction}]}
+    effect: {decision: escalate}
+    reason: "Customer requests escalation or expresses dissatisfaction with support"
+    source: {doc: ESC, section: "Common Escalation Triggers > Customer requests escalation"}
+  # SOP Step 2.4: issue persists after L1 troubleshooting -> Step 3 (escalate). Set by the resolve node.
+  - id: SOP-STEP2-EXHAUSTED
+    stage: escalate
+    when: {fact: all_steps_tried}
+    effect: {decision: escalate}
+    reason: "Every L1 step in the chosen runbook section was already tried and the issue persists"
+    source: {doc: ESC, section: "Procedure > Step 2: Attempt Basic Troubleshooting (4. issue persists -> Step 3)"}
+  # The chosen runbook's own "When to Escalate" criteria (selected by number by the resolve node, verified in code).
+  - id: RB-WHEN-TO-ESCALATE
+    stage: escalate
+    when: {fact: runbook_escalation_met}
+    effect: {decision: escalate}
+    reason: "Runbook escalation criterion met: {runbook_escalation_text}"
+    source: {doc: "chosen runbook", section: "When to Escalate"}
+
+  # --- stage escalate: AX-15 policy -----------------------------------------------------------
+  - id: AX-KB-GAP-SYSTEM
+    stage: escalate
+    when: {fact: unknown_system}
+    effect: {decision: escalate, flag: kb_gap, no_steps: true}
+    reason: "System not in the KB or CMDB ({unknown_systems_text}): no steps can be grounded"
+    source: {doc: AX, section: "Unknown system -> L2 with kb_gap; never invent steps"}
+  - id: AX-KB-GAP-NO-DOC
+    stage: escalate
+    when: {fact: kb_no_doc}
+    effect: {decision: escalate, flag: kb_gap, no_steps: true}
+    reason: "No runbook fits this issue (doc picker returned none)"
+    source: {doc: AX, section: "No KB doc -> L2 with kb_gap"}
+  - id: AX-L2-ONLY
+    stage: escalate
+    when: {fact: l2_only_needed}
+    effect: {decision: escalate}
+    reason: "The fix is an L2-only procedure ({l2_only_text})"
+    source: {doc: AX, section: "L2-only procedure -> L2 (store never sees L2-only text)"}
+
+  - id: AX-LLM-FAILED
+    stage: escalate
+    when: {fact: llm_failed}
+    effect: {decision: escalate, flag: llm_failed, no_steps: true}
+    reason: "A model step failed ({llm_failed_text}): escalate rather than guess"
+    source: {doc: AX, section: "Fail safe -> L2"}
+
+  # --- proposed SOP change for ServeWell (not active: shown as an offline what-if only) ----------
+  - id: SOP-PROPOSED-NET
+    stage: escalate
+    proposed: true
+    active: false
+    when: {all: [{fact: network_issue}, {fact: pos_affected}, {fact: during_service}]}
+    effect: {decision: escalate}
+    reason: "Proposed: network issue affecting POS during service -> L2"
+    source: {doc: AX, section: "Proposed SOP change (not in SOP-IT-L1-002; inactive, what-if only)"}
+
+  # --- stage clarify -------------------------------------------------------------------------
+  - id: AX-ASSET-UNVERIFIED
+    stage: clarify
+    when: {fact: asset_unverified}
+    effect: {decision: clarify, no_steps: true}
+    reason: "Asset {asset_id_text} could not be verified in the CMDB and no single matching device exists at the store"
+    source: {doc: AX, section: "Asset not_found -> no steps; ask the store to confirm (or L2 if a trigger fires)"}
+  - id: AX-SYSTEM-MISMATCH
+    stage: clarify
+    when: {fact: system_mismatch}
+    effect: {decision: clarify, no_steps: true}
+    reason: "Ticket names {claimed_system_text} but the CMDB asset runs {cmdb_system_text}"
+    source: {doc: AX, section: "System mismatch -> no steps; ask the store to confirm (or L2 if a trigger fires)"}
+  - id: AX-VAGUE
+    stage: clarify
+    when: {fact: clarity_vague}
+    effect: {decision: clarify}
+    reason: "Ticket too vague to act on: ask 1-3 targeted questions"
+    source: {doc: AX, section: "Vague ticket -> needs_clarification"}
+
+# Base priority (SOP Step 4.1): first matching rule wins; none -> keep the ticket's priority.
+priority_base:
+  - id: SOP-PRI-P1
+    when: {any: [{fact: store_wide_outage}, {fact: payments_unavailable}, {fact: multiple_locations}, {fact: pos_outage_all}]}
+    priority: P1
+    reason: "Critical: complete store outage, payment processing unavailable, or multiple locations"
+    source: {doc: ESC, section: "Step 4: Assess Priority > Critical (P1)"}
+  - id: SOP-PRI-P2
+    when: {any: [{fact: partial_outage}, {fact: devices_affected, op: ">=", value: 2}]}
+    priority: P2
+    reason: "High: partial outage at one location / 50%+ of POS terminals / back-office down"
+    source: {doc: ESC, section: "Step 4: Assess Priority > High (P2)"}
+  - id: SOP-PRI-P3
+    when: {any: [{fact: device_unusable}, {fact: function_degraded}]}
+    priority: P3
+    reason: "Medium: single device down or non-critical function degraded"
+    source: {doc: ESC, section: "Step 4: Assess Priority > Medium (P3)"}
+  - id: SOP-PRI-P4
+    when: {fact: cosmetic_only}
+    priority: P4
+    reason: "Low: cosmetic issue / single user impact"
+    source: {doc: ESC, section: "Step 4: Assess Priority > Low (P4)"}
+
+# Priority overrides (SOP Section "Priority Override Rules"), applied in this order; P1..P4 bounds.
+# increases_stack: false -> the "+1" rows together raise the priority by at most one level (iteration 2;
+# stacking peak + corporate + recurrence pushed single-device tickets to P1). Set true for the literal reading.
+increases_stack: false
+priority_overrides:
+  - id: SOP-PRI-PEAK
+    when: {fact: opened_hour_ist, op: hour_in, value: [[11, 14], [18, 21]]}
+    change: +1
+    reason: "Opened in peak service hours (11:00-14:00 or 18:00-21:00 IST)"
+    source: {doc: ESC, section: "Priority Override Rules > Time-sensitive context"}
+  - id: SOP-PRI-RECUR
+    when: {fact: recurrence_count, op: ">=", value: 2}
+    change: +1
+    reason: "Recurring: the same issue reported more than twice in 30 days ({recurrence_count} earlier reports)"
+    source: {doc: ESC, section: "Priority Override Rules > Recurring issue"}
+  - id: SOP-PRI-VIP
+    when: {fact: store_type, op: "==", value: corporate}
+    change: +1
+    reason: "Corporate chain location"
+    source: {doc: ESC, section: "Priority Override Rules > VIP customer"}
+  - id: SOP-PRI-EXTERNAL
+    when: {fact: compliance_impact}
+    change: +1
+    reason: "Blocks a vendor, auditor or regulatory compliance requirement"
+    source: {doc: ESC, section: "Priority Override Rules > External dependency"}
+  - id: SOP-PRI-CUST-ESC
+    when: {fact: customer_requested_escalation}
+    change: at_least_P2
+    reason: "Customer escalated to management / requested escalation: P1 or P2, route to manager"
+    source: {doc: ESC, section: "Priority Override Rules > Customer escalation"}
+  - id: SOP-PRI-KNOWN
+    when: {fact: known_issue_workaround}
+    change: -1
+    reason: "Known issue with a documented temporary fix (version matrix)"
+    source: {doc: ESC, section: "Priority Override Rules > Known issue with workaround"}
+
+# L2 handoff (SOP Step 3 mandatory fields + Step 5 documentation + escalation email template).
+handoff:
+  mandatory: [asset_id, error_codes, steps_tried, store_impact]
+  documentation: [summary, store, priority, sla, contact, attachments_requested]
+  source: {doc: ESC, section: "Step 3: Collect Mandatory Escalation Information; Step 5; Escalation Email Template"}
+  notify: {l2: it-l2@servewell.in, p1_also: oncall@servewell.in,
+           facilities: facilities-logistics@servewell.in}   # kb/system-specs/star-printer.md > Support & Escalation

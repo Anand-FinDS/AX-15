@@ -1,0 +1,51 @@
+# Model configuration — change models here only, never in code.
+
+llm:
+  base:
+    provider: anthropic
+    model: claude-haiku-5-5        # $0.10 in / $0.50 out per MTok (prompts <=100K tokens)
+    max_prompt_tokens: 90000       # stay under the 100K price tier
+    effort: low                    # short grounded answers; raise per node if evals show a need
+    # USD per MTok; cache reads 0.1x input, 5-min cache writes 1.25x input (prompts <= 100K tokens)
+    price_per_mtok: {input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.125}
+  fallback:                        # availability fallback (outage / rate limit / timeout)
+    provider: openai
+    model: gpt-6-luna              # $0.10 / $0.50 per MTok
+    price_per_mtok: {input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.10}
+  open_source:                     # cost switchover / comparison
+    provider: groq
+    base_url: https://api.groq.com/openai/v1
+    model: openai/gpt-oss-120b
+
+# Per-node overrides (L4). Default: every node uses llm.base. 2.0 graph LLM nodes: max_tokens per call.
+nodes:
+  v2_classify: {max_tokens: 3000}
+  v2_resolve: {max_tokens: 3000}
+  v2_compose: {max_tokens: 3000}
+
+# Agent run limits (L4). On any limit the run ends with status "incomplete".
+agents:
+  v1:
+    max_tool_calls: 12
+    max_tokens: 4096               # per model call (thinking + text)
+    max_output_tokens: 24000       # whole run
+    timeout_s: 180
+  v2:
+    max_llm_calls: 8               # classify + picker + resolve + compose, with retries
+    timeout_s: 180
+    route_max_candidates: 5        # dual-query merge (raw ticket text + clean symptom)
+
+# 2.0 routing. dual_query=false: the locked route_and_pick path (raw subject + description, top 3 -> pick_doc).
+# true = also route on classify's clean_symptom and merge up to 5 candidates (evaluated, dropped 2026-11-23).
+routing:
+  dual_query: false
+
+# Session spend guard for API-calling runs (agent, picker, judges).
+spend:
+  session_cap_usd: 3.0
+
+embeddings:
+  provider: openai
+  model: text-embedding-3-large
+  dimensions: 1536                 # keeps HNSW indexable (pgvector vector <= 2000 dims)
+  batch_size: 100

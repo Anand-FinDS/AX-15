@@ -1,0 +1,42 @@
+[project]
+name = "ax15"
+version = "0.1.0"
+description = "AX-15 — IT Support Agent POC for ServeWell Hospitality (phData Intelligence Platform challenge)"
+requires-python = ">=3.11"
+dependencies = [
+  "anthropic",
+  "openai",
+  "psycopg[binary]>=3.1",
+  "pgvector",
+  "pydantic>=2",
+  "python-dotenv",
+  "pyyaml",
+  "rich",
+  "langfuse>=5.2,<6",           # tracing sink (optional at runtime: no keys -> local JSON only)
+  "langgraph>=1.2,<2",          # 2.0 workflow
+  "langgraph-checkpoint-postgres>=3.1,<4",   # HITL checkpointer (tables: migration 010)
+  "langgraph-checkpoint-sqlite>=3.1,<4",     # checkpointer fallback
+]
+
+[project.scripts]
+ax15 = "ax15.cli:main"
+
+[project.optional-dependencies]
+# Optional extras: the Streamlit console and the test tools.
+agents = ["langgraph", "mcp"]
+app = ["streamlit>=1.50"]
+dev = ["pytest", "ruff"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "db: needs a live database (DATABASE_URL / DATABASE_URL_DIRECT)",
+    "llm: makes a real model API call (small cost)",
+]

@@ -1,0 +1,18 @@
+.env
+*.pyc
+__pycache__/
+.DS_Store
+generate/.checkpoint.json
+
+# AX-15 additions
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+outputs/*
+!outputs/.gitkeep
+incoming/*/
+!incoming/test10/
+*.docx~
+~$*

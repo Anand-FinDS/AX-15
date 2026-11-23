@@ -1,0 +1,161 @@
+{
+  "name": "AX-15 RAG golden set v1",
+  "created": "2026-11-21",
+  "purpose": "Check that retrieval finds the right KB section and that the answer stays grounded in it. Questions are phrased like store staff, not copied from headings, to test semantic retrieval.",
+  "scoring": {
+    "retrieval_hit": "any expected_docs path appears in top-5 retrieved chunks",
+    "section_hit": "a top-5 chunk breadcrumb contains expected_section (case-insensitive)",
+    "answer_facts": "share of must_include facts present in the answer (string match or LLM judge)",
+    "answer_safety": "none of must_not appear in the answer",
+    "answer_type": "answer | not_in_kb (bot must say KB does not cover it, no invented steps) | l2_only (bot must not give the L2 steps to store staff)"
+  },
+  "items": [
+    {
+      "id": "G01",
+      "question": "Our main till went dead after a power cut and now it won't boot up. What should we try first?",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/pos-startup-failure.md"],
+      "expected_section": "Immediate Steps",
+      "must_include": [
+        "check power cable and network connection/LED",
+        "hold the power button about 10 seconds until it shuts down",
+        "wait about 30 seconds before powering on",
+        "allow about 2 minutes for startup without interrupting"
+      ],
+      "must_not": ["registry", "reinstall FoodTech", "database restore"],
+      "reference_answer": "Check the power cable and that the network LED is lit. Do a safe power cycle: hold the power button ~10 s until fully off, wait 30 s, power on once and let it start for a full 2 minutes without interrupting. Note the time and photograph any error code; if it still fails, continue with the runbook diagnosis or escalate."
+    },
+    {
+      "id": "G02",
+      "question": "Customers can't pay by card — the PIN pad at counter 1 isn't responding to anything.",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/pos-pin-pad.md"],
+      "expected_section": "Immediate Steps",
+      "must_include": [
+        "unplug the PIN pad cable for about 30 seconds and reconnect",
+        "check cables are fully seated and undamaged",
+        "restart the FoodTech POS application only, not Windows"
+      ],
+      "must_not": ["restart the entire POS system first"],
+      "reference_answer": "Unplug the PIN pad's USB/serial cable for 30 seconds and reconnect it (don't restart the whole POS yet). Check the cable is fully seated at both ends with no damage. Then close the FoodTech POS application, wait 15 seconds and reopen it, and see if the PIN pad reconnects. Payment failures are an immediate-escalation trigger in the SOP if this doesn't fix it."
+    },
+    {
+      "id": "G03",
+      "question": "The receipt printer is feeding paper but every receipt comes out completely blank.",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/printer-wrong-output.md"],
+      "expected_section": "Immediate Steps",
+      "must_include": [
+        "check thermal paper is loaded shiny side down toward the print head",
+        "use the FEED button test (hold about 2 seconds) to print a test pattern",
+        "a blank test print means hardware or driver failure"
+      ],
+      "must_not": ["replace the ink ribbon", "ink cartridge"],
+      "reference_answer": "Check the thermal roll is loaded correctly — shiny side down, toward the print head — and isn't jammed. Hold the FEED button for 2 seconds to print the factory test pattern. If the test pattern prints, the printer is fine and the issue is application-side; if the test print is blank, it points to a hardware or driver failure and should be escalated."
+    },
+    {
+      "id": "G04",
+      "question": "Receipts are printing but the first lines are shifted to the right and cut off. We already restarted the printer.",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/printer-wrong-output.md"],
+      "expected_section": "Print Width",
+      "must_include": [
+        "open StarMC Print v2 printer configuration settings",
+        "check receipt width setting",
+        "check margins (left 0mm, top 5mm) or restore factory settings",
+        "save, reopen StarMC and run a test print",
+        "escalate to L2 if the format is still wrong"
+      ],
+      "must_not": ["update the driver without L2 approval"],
+      "reference_answer": "Misaligned format maps to Resolution Step 3: in StarMC Print v2 → Settings → Printer Configuration, check Receipt Width (runbook says 80mm), then on Receipt Format confirm Left Margin 0mm and Top Margin 5mm, or Restore Factory Settings. Save and Apply, close and reopen StarMC, run a test print, and escalate to L2 if it's still wrong. Driver updates need L2 approval.",
+      "note": "KB conflict: printer-wrong-output.md says 80mm; printer-paper-jam.md and star-printer.md say 58mm receipt paper. Acceptable answers cite the runbook value; best answers flag the discrepancy."
+    },
+    {
+      "id": "G05",
+      "question": "Paper is stuck inside the receipt printer and won't come out. How do we clear it safely?",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/printer-paper-jam.md", "faq/printers-faq.md"],
+      "expected_section": "Immediate Steps",
+      "must_include": [
+        "power the printer off and wait about 10 seconds",
+        "open the cover and look for torn fragments or debris",
+        "do not insert fingers beyond the visible area / do not force it",
+        "check the paper roll type and condition"
+      ],
+      "must_not": ["use a knife", "pull hard"],
+      "reference_answer": "Switch the printer off and wait 10 seconds (don't keep power-cycling). Open the top cover and look for torn fragments or crumpled paper; remove only what's visible — don't push fingers deeper or force it. Check the roll is the right type and not damaged or damp, then reload and test."
+    },
+    {
+      "id": "G06",
+      "question": "Nothing in the store can get online — POS, kitchen screen, everything. The router lights look off.",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/network-router-offline.md"],
+      "expected_section": "Immediate Steps",
+      "must_include": [
+        "check ethernet cables to the router WAN port and modem",
+        "check the modem has power and power-cycle it if unresponsive",
+        "check whether other stores are affected (ISP outage)",
+        "note the outage time and alert the shift manager"
+      ],
+      "must_not": ["factory reset the router"],
+      "reference_answer": "Reseat the ethernet cables on the router's WAN port and the modem, confirm the modem has power and normal lights (power-cycle it if unresponsive), check whether nearby stores are also down (possible ISP outage), and note the start time and alert the shift manager. A whole-store outage is an SOP immediate-escalation trigger if these steps don't restore it."
+    },
+    {
+      "id": "G07",
+      "question": "It's lunch rush and the problem is slowing service. Does that change how urgent the ticket is?",
+      "answer_type": "answer",
+      "expected_docs": ["sop/escalation-procedure.md"],
+      "expected_section": "Priority Override",
+      "must_include": [
+        "peak service hours are 11:00–14:00 and 18:00–21:00",
+        "issues during peak hours raise priority by one level",
+        "maximum priority is P1"
+      ],
+      "must_not": [],
+      "reference_answer": "Yes. Under the escalation SOP's priority override rules, an issue during peak service hours (11:00–14:00 or 18:00–21:00) is raised by one priority level, up to a maximum of P1."
+    },
+    {
+      "id": "G08",
+      "question": "Soft serve machine shows E04 and won't dispense. What does that mean and what do we do?",
+      "answer_type": "answer",
+      "expected_docs": ["runbooks/soft-serve-error-codes.md", "runbooks/soft-serve-overcooling.md"],
+      "expected_section": "E04",
+      "must_include": [
+        "E04 means hopper low or empty",
+        "refill the hopper with mix to the full line",
+        "if it persists, power off, remove the hopper and gently clean the sensor arm",
+        "escalate if E04 recurs after refill and sensor cleaning"
+      ],
+      "must_not": [],
+      "reference_answer": "E04 is Hopper Low/Empty. Refill the hopper with the correct mix to the full line and close it. If the error stays, power off, remove the hopper, gently clean the sensor arm with a dry lint-free cloth (don't bend it), reinstall and power on. If E04 comes back, escalate noting 'hopper refilled and sensor cleaned — error persists'.",
+      "note": "Second meaning in KB: on CreamTech SC-300 with firmware < 3.1.2 and ambient > 35°C, E04 can be a false alarm (soft-serve-overcooling.md). Best answers mention this when the model/firmware is known."
+    },
+    {
+      "id": "G09",
+      "question": "Can you give me the steps to upgrade our FoodTech POS terminal to the latest version myself?",
+      "answer_type": "l2_only",
+      "expected_docs": ["system-specs/foodtech-pos.md", "runbooks/pos-software-update.md"],
+      "expected_section": "Upgrade",
+      "must_include": [
+        "upgrades are performed by L2 only",
+        "raise/escalate to L2 rather than attempting it at the store"
+      ],
+      "must_not": ["pre-upgrade checklist steps given to store staff", "500 MB", "rollback procedure steps"],
+      "reference_answer": "Software upgrades are an L2-only procedure (they need a verified backup, connectivity checks and a maintenance window), so store staff shouldn't run them. Raise a request to L2 with the terminal ID and current version."
+    },
+    {
+      "id": "G10",
+      "question": "Our KitchenBridge v2.3 display isn't syncing with the POS. How do we reset KitchenBridge?",
+      "answer_type": "not_in_kb",
+      "expected_docs": [],
+      "expected_section": "",
+      "must_include": [
+        "KitchenBridge is not covered in the knowledge base",
+        "no invented KitchenBridge steps",
+        "escalate to L2 with system/vendor/version details"
+      ],
+      "must_not": ["KitchenBridge reset steps", "KitchenBridge settings menu"],
+      "reference_answer": "KitchenBridge isn't documented in the ServeWell knowledge base, so there's no approved procedure to follow. Per the escalation SOP, a system or error not in the knowledge base goes to L2 — include the system name/version, vendor if known, what was tried and the store impact."
+    }
+  ]
+}
