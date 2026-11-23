@@ -54,7 +54,7 @@ version matrix is loaded as a table.
 - **OpenAI text-embedding-3-large (1536 dimensions):** knowledge-base embeddings.
 - **Claude Haiku 5.5 as judge:** grades the adversarial ("chaos") set. Evaluation only.
 
-### 1.0 
+### 1.0: the single-agent baseline
 
 ![AX-15 1.0: one Claude Haiku 5.5 agent in a loop reads the ticket, calls 7 read-only tools and reads their results until it writes a JSON answer (routing, priority, steps, reply); a person approves or rejects the proposed action, which goes to the action log.](docs/images/ax15_v1_architecture.png)
 
